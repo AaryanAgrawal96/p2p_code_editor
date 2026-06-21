@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>P2P Code Editor</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { background: #1e1e1e; color: #fff; font-family: monospace; height: 100vh; display: flex; flex-direction: column; }
+      #toolbar { padding: 10px 16px; background: #2d2d2d; display: flex; align-items: center; gap: 12px; }
+      #peers { font-size: 13px; color: #888; }
+      #editor-container { flex: 1; }
+      #output-panel { height: 150px; background: #111; padding: 10px 16px; overflow-y: auto; border-top: 1px solid #333; }
+      #output { font-size: 13px; color: #9cdcfe; white-space: pre-wrap; }
+      button { background: #0e639c; color: white; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+      button:hover { background: #1177bb; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js"></script>
+  </head>
+  <body>
+    <div id="toolbar">
+      <button id="runBtn">▶ Run</button>
+      <span id="peers">Peers: 0</span>
+    </div>
+    <div id="editor-container"></div>
+    <div id="output-panel">
+      <div id="output">Output will appear here...</div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
