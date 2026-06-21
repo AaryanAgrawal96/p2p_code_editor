@@ -1,6 +1,19 @@
 import * as Y from "yjs";
 import { WebrtcProvider } from "y-webrtc";
 import * as monaco from "monaco-editor";
+import { removeAwarenessStates } from "y-protocols/awareness";
+
+// --- Monaco web worker setup ---
+// Without this, Vite doesn't know how to bundle Monaco's worker files,
+// so Monaco silently falls back to running on the main thread instead
+// (this was the source of the "Could not create web worker(s)" warning).
+import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
+
+self.MonacoEnvironment = {
+  getWorker() {
+    return new EditorWorker();
+  },
+};
 
 // --- Yjs setup ---
 const ydoc = new Y.Doc();
@@ -112,10 +125,35 @@ ymap.observe((event) => {
     if (isLeader()) {
       const lastHandled = window._lastHandledRequest;
       if (lastHandled === runRequest.requestId) return;
+
+      // Guard 1: don't re-execute a request that's already been
+      // answered. This happens when a brand-new peer syncs the full
+      // document history and sees an old runRequest that already
+      // has a matching runResult sitting next to it.
+      const existingResult = ymap.get("runResult");
+      if (existingResult && existingResult.requestId === runRequest.requestId) {
+        window._lastHandledRequest = runRequest.requestId;
+        return;
+      }
+
+      // Guard 2: don't execute a request whose original requester
+      // has since disconnected. CRDTs preserve state forever, so an
+      // abandoned, never-fulfilled runRequest can sit in the doc and
+      // get inherited by a peer that joins much later — even though
+      // nobody is actually waiting for that output anymore.
+      const stillConnected = provider.awareness
+        .getStates()
+        .has(runRequest.requestedBy);
+      if (!stillConnected) {
+        window._lastHandledRequest = runRequest.requestId;
+        return;
+      }
+
       window._lastHandledRequest = runRequest.requestId;
 
-      // Fire async execution without awaiting inside observer
-      executeCode(runRequest.requestId);
+      // Defer to next tick so Yjs finishes broadcasting this
+      // transaction over the network before we block the thread.
+      setTimeout(() => executeCode(runRequest.requestId), 0);
     }
   }
 
@@ -162,7 +200,9 @@ document.getElementById("runBtn").addEventListener("click", () => {
   document.getElementById("output").textContent =
     "Run requested, waiting for executor...";
 
-  // Start failure detection — if no result in 30s, re-elect and retry
+  // Start failure detection — if no result in 30s, evict the dead
+  // leader's awareness entry ourselves (don't wait for Yjs's own
+  // ~30s cleanup), then re-elect and retry
   executionTimeout = setTimeout(() => {
     const currentResult = ymap.get("runResult");
     const currentRequest = ymap.get("runRequest");
@@ -171,6 +211,18 @@ document.getElementById("runBtn").addEventListener("click", () => {
       !currentResult ||
       currentResult.requestId !== currentRequest?.requestId
     ) {
+      const suspectedDeadLeader = electLeader();
+
+      // Never evict ourselves — if we're the only one left,
+      // electLeader() will correctly return our own id
+      if (suspectedDeadLeader !== myId) {
+        removeAwarenessStates(
+          provider.awareness,
+          [suspectedDeadLeader],
+          "execution-timeout"
+        );
+      }
+
       document.getElementById("output").textContent =
         "Executor timed out. Re-electing and retrying...";
 
